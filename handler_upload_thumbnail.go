@@ -43,15 +43,13 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	thumb, err := get_thumbnail_from_request(r)
+	thumb, err := getThumbnailFromRequest(r)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't get thumbnail", err)
 		return
 	}
 
-	videoThumbnails[videoID] = thumb
-
-	thumbURL := cfg.makeThumbURL(videoID)
+	thumbURL := cfg.makeThumbURL(thumb)
 	video.ThumbnailURL = &thumbURL
 
 	err = cfg.db.UpdateVideo(video)
@@ -63,7 +61,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	respondWithJSON(w, http.StatusOK, video)
 }
 
-func get_thumbnail_from_request(r *http.Request) (thumbnail, error) {
+func getThumbnailFromRequest(r *http.Request) (thumbnail, error) {
 	const maxMemory = 10 << 20
 	err := r.ParseMultipartForm(maxMemory)
 	if err != nil {

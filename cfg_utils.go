@@ -1,11 +1,11 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
-
-	"github.com/google/uuid"
 )
 
-func (cfg *apiConfig) makeThumbURL(videoID uuid.UUID) string {
-	return fmt.Sprintf("http://localhost:%s/api/thumbnails/%s", cfg.port, videoID.String())
+func (cfg *apiConfig) makeThumbURL(thumb thumbnail) string {
+	data := base64.StdEncoding.EncodeToString(thumb.data)
+	return fmt.Sprintf("data:%s;base64,%s", thumb.mediaType, data)
 }
