@@ -1,14 +1,21 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"github.com/google/uuid"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 )
+
+var unallowedMediaType = errors.New("Media type not allowed")
 
 func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Request) {
 	videoIDString := r.PathValue("videoID")
@@ -43,17 +50,50 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	thumb, err := getThumbnailFromRequest(r)
+	mediaType, thumbFile, err := getThumbnailFromRequest(r)
 	if err != nil {
+		if errors.Is(err, unallowedMediaType) {
+			respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Couldn't get thumbnail: %s", err.Error()), err)
+			return
+		}
 		respondWithError(w, http.StatusInternalServerError, "Couldn't get thumbnail", err)
 		return
 	}
+	defer thumbFile.Close()
 
-	thumbURL := cfg.makeThumbURL(thumb)
+	exts, err := mime.ExtensionsByType(mediaType)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't get media type", err)
+		return
+	}
+	mediaTypeExt := exts[0]
+	thumbPath := filepath.Join(cfg.assetsRoot, fmt.Sprintf("%s%s", videoID.String(), mediaTypeExt))
+	if _, err := os.Stat(thumbPath); err == nil {
+		if err := os.Remove(thumbPath); err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Couldn't remove existing thumb file", err)
+			return
+		}
+	} else if !os.IsNotExist(err) {
+		respondWithError(w, http.StatusInternalServerError, "Error checking existing thumb file", err)
+		return
+	}
+
+	localThumbFile, err := os.Create(thumbPath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create thumb file", err)
+		return
+	}
+	defer localThumbFile.Close()
+
+	_, err = io.Copy(localThumbFile, thumbFile)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't write to thumb file", err)
+		return
+	}
+	thumbURL := fmt.Sprintf("http://localhost:%s/assets/%s%s", cfg.port, videoID.String(), mediaTypeExt)
 	video.ThumbnailURL = &thumbURL
 
-	err = cfg.db.UpdateVideo(video)
-	if err != nil {
+	if err = cfg.db.UpdateVideo(video); err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't update video url", err)
 		return
 	}
@@ -61,30 +101,30 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	respondWithJSON(w, http.StatusOK, video)
 }
 
-func getThumbnailFromRequest(r *http.Request) (thumbnail, error) {
+func getThumbnailFromRequest(r *http.Request) (string, multipart.File, error) {
 	const maxMemory = 10 << 20
 	err := r.ParseMultipartForm(maxMemory)
 	if err != nil {
-		return thumbnail{}, err
+		return "", nil, err
 	}
 
 	file, header, err := r.FormFile("thumbnail")
 	if err != nil {
-		return thumbnail{}, err
-	}
-	defer file.Close()
-
-	data, err := io.ReadAll(file)
-	if err != nil {
-		return thumbnail{}, err
+		return "", nil, err
 	}
 
 	mediaType := header.Header.Get("Content-Type")
-
-	thumb := thumbnail{
-		mediaType: mediaType,
-		data:      data,
+	mt, _, err := mime.ParseMediaType(mediaType)
+	if err != nil {
+		return "", nil, err
+	}
+	allowedMediaTypes := map[string]struct{}{
+		"image/jpeg": {},
+		"image/png":  {},
+	}
+	if _, ok := allowedMediaTypes[mt]; !ok {
+		return "", nil, unallowedMediaType
 	}
 
-	return thumb, nil
+	return mediaType, file, nil
 }
