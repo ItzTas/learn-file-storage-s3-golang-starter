@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -67,7 +69,16 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	mediaTypeExt := exts[0]
-	thumbPath := filepath.Join(cfg.assetsRoot, fmt.Sprintf("%s%s", videoID.String(), mediaTypeExt))
+
+	thumbShabytes := make([]byte, 32)
+	if _, err = rand.Read(thumbShabytes); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't make thumb sha", err)
+		return
+	}
+	thumbSha := base64.RawURLEncoding.EncodeToString(thumbShabytes)
+
+	thumbName := fmt.Sprintf("%s%s", thumbSha, mediaTypeExt)
+	thumbPath := filepath.Join(cfg.assetsRoot, thumbName)
 	if _, err := os.Stat(thumbPath); err == nil {
 		if err := os.Remove(thumbPath); err != nil {
 			respondWithError(w, http.StatusInternalServerError, "Couldn't remove existing thumb file", err)
@@ -90,7 +101,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, http.StatusInternalServerError, "Couldn't write to thumb file", err)
 		return
 	}
-	thumbURL := fmt.Sprintf("http://localhost:%s/assets/%s%s", cfg.port, videoID.String(), mediaTypeExt)
+	thumbURL := fmt.Sprintf("http://localhost:%s/assets/%s", cfg.port, thumbName)
 	video.ThumbnailURL = &thumbURL
 
 	if err = cfg.db.UpdateVideo(video); err != nil {
