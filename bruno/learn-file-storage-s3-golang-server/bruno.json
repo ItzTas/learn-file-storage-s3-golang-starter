@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "learn-file-storage-s3-golang-server",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}
