@@ -1,13 +1,15 @@
 package main
 
 import (
+	"io"
 	"mime"
 	"mime/multipart"
 	"net/http"
 	"os"
 
-	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
+
+	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 )
 
 func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request) {
@@ -45,7 +47,21 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defer newVideo.Close()
-	os.CreateTemp("", "tubely-upload.mp4")
+	tmpVideo, err := os.CreateTemp("", "tubely-upload.mp4")
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not create new temporary video", err)
+		return
+	}
+	defer func() {
+		tmpVideo.Close()
+		os.Remove(tmpVideo.Name())
+	}()
+	_, err = io.Copy(tmpVideo, newVideo)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not copy new video to tmp file", err)
+		return
+	}
+	tmpVideo.Seek(0, io.SeekStart)
 }
 
 func getVideoFromRequest(r *http.Request) (string, multipart.File, error) {
