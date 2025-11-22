@@ -1,5 +1,5 @@
 out
 *.db
 .env
-assets/
+/assets/
 samples/
