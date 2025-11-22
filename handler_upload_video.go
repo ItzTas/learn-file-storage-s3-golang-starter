@@ -1,19 +1,26 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
 	"net/http"
 	"os"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
 
+	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/assets"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 )
 
 func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request) {
 	const uploadLimit = 1 << 30
+	r.Body = http.MaxBytesReader(w, r.Body, uploadLimit)
+
 	videoIDString := r.PathValue("videoID")
 	videoID, err := uuid.Parse(videoIDString)
 	if err != nil {
@@ -26,7 +33,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	userID, err := auth.ValidateJWT(token)
+	userID, err := auth.ValidateJWT(token, cfg.jwtSecret)
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, "Could not validade user", err)
 		return
@@ -41,7 +48,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusUnauthorized, "Not authorized to update this video", nil)
 		return
 	}
-	_, newVideo, err := getVideoFromRequest(r)
+	mt, newVideo, err := getVideoFromRequest(r)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Could not get new video", err)
 		return
@@ -53,15 +60,55 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defer func() {
-		tmpVideo.Close()
-		os.Remove(tmpVideo.Name())
+		err := tmpVideo.Close()
+		if err != nil {
+			fmt.Println("Error closing file", err)
+		}
+		err = os.Remove(tmpVideo.Name())
+		if err != nil {
+			fmt.Println("Error removing file", err)
+		}
 	}()
+
 	_, err = io.Copy(tmpVideo, newVideo)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Could not copy new video to tmp file", err)
 		return
 	}
-	tmpVideo.Seek(0, io.SeekStart)
+
+	_, err = tmpVideo.Seek(0, io.SeekStart)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not reset file pointer", err)
+		return
+	}
+
+	key, err := assets.GetAssetsPath(mt)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not generate asset path", err)
+		return
+	}
+
+	_, err = cfg.s3Client.PutObject(context.TODO(), &s3.PutObjectInput{
+		Bucket:      &cfg.s3Bucket,
+		Key:         aws.String(key),
+		Body:        tmpVideo,
+		ContentType: aws.String(mt),
+	})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not store video object", err)
+		return
+	}
+
+	newURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", cfg.s3Bucket, cfg.s3Region, key)
+	video.VideoURL = &newURL
+
+	err = cfg.db.UpdateVideo(video)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not update video", err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, video)
 }
 
 func getVideoFromRequest(r *http.Request) (string, multipart.File, error) {
@@ -89,5 +136,5 @@ func getVideoFromRequest(r *http.Request) (string, multipart.File, error) {
 		return "", nil, unallowedMediaType
 	}
 
-	return mt, file, nil
+	return mediaType, file, nil
 }
