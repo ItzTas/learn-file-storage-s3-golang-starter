@@ -90,13 +90,19 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	processedVideoName, err := videos.ProcessVideoForFastStart(tmpVideo.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not process video for fast start", err)
+		return
+	}
+
 	key, err := assets.GetAssetsPath(mt)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Could not generate asset path", err)
 		return
 	}
 
-	aspectRatio, err := videos.GetVideoAspectRatio(tmpVideo.Name())
+	aspectRatio, err := videos.GetVideoAspectRatio(processedVideoName)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Could not get video aspect ratio", err)
 		return
@@ -113,10 +119,22 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 
 	key = path.Join(prefix, key)
 
+	processedVideo, err := os.Open(processedVideoName)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not open processed video", err)
+		return
+	}
+	defer func() {
+		err := processedVideo.Close()
+		if err != nil {
+			fmt.Println("Error opening processedVideo", err)
+		}
+	}()
+
 	_, err = cfg.s3Client.PutObject(context.TODO(), &s3.PutObjectInput{
 		Bucket:      &cfg.s3Bucket,
 		Key:         aws.String(key),
-		Body:        tmpVideo,
+		Body:        processedVideo,
 		ContentType: aws.String(mt),
 	})
 	if err != nil {
