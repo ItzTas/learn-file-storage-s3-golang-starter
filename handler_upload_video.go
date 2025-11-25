@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/assets"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
+	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/videos"
 )
 
 func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +55,13 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "Could not get new video", err)
 		return
 	}
-	defer newVideo.Close()
+	defer func() {
+		err := newVideo.Close()
+		if err != nil {
+			fmt.Println("Error closing file", err)
+		}
+	}()
+
 	tmpVideo, err := os.CreateTemp("", "tubely-upload.mp4")
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Could not create new temporary video", err)
@@ -87,6 +95,23 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "Could not generate asset path", err)
 		return
 	}
+
+	aspectRatio, err := videos.GetVideoAspectRatio(tmpVideo.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not get video aspect ratio", err)
+		return
+	}
+
+	prefix := "other"
+
+	switch aspectRatio {
+	case videos.Aspect169:
+		prefix = "landscape"
+	case videos.Aspect916:
+		prefix = "portrait"
+	}
+
+	key = path.Join(prefix, key)
 
 	_, err = cfg.s3Client.PutObject(context.TODO(), &s3.PutObjectInput{
 		Bucket:      &cfg.s3Bucket,
