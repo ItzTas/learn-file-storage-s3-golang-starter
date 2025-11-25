@@ -39,14 +39,24 @@ func calculateAspectRatio(vm VideoMetadata) AspectRatio {
 		return AspectOther
 	}
 
-	width := vm.Streams[0].Width
-	height := vm.Streams[0].Height
+	width := float64(vm.Streams[0].Width)
+	height := float64(vm.Streams[0].Height)
+	ratio := width / height
 
-	if width*9 == height*16 {
+	if closeEnough(ratio, 16.0/9.0) {
 		return Aspect169
 	}
-	if width*16 == height*9 {
+	if closeEnough(ratio, 9.0/16.0) {
 		return Aspect916
 	}
 	return AspectOther
+}
+
+func closeEnough(a, b float64) bool {
+	const epsilon = 0.01
+	diff := a - b
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff < epsilon
 }
