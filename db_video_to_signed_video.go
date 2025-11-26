@@ -9,7 +9,13 @@ import (
 )
 
 func (cfg *apiConfig) dbVideoToSignedVideo(video database.Video) (database.Video, error) {
+	if video.VideoURL == nil || *video.VideoURL == "" {
+		return video, nil
+	}
 	splits := strings.Split(*video.VideoURL, ",")
+	if len(splits) != 2 {
+		return video, nil
+	}
 	bucket, key := splits[0], splits[1]
 
 	expireTime := 1 * time.Minute
